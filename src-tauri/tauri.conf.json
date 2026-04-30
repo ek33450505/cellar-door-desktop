@@ -25,6 +25,16 @@
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/ek33450505/cellar-door-desktop/releases/latest/download/latest.json"
+      ],
+      "active": false,
+      "dialog": false
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

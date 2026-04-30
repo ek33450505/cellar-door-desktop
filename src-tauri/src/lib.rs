@@ -1,5 +1,6 @@
 mod commands;
 mod db;
+mod watcher;
 
 use commands::injection_log::list_injections;
 use commands::memories::{fts_search, list_memories, memories_at, supersession_chain};
@@ -25,6 +26,10 @@ pub fn run() {
             fts_search,
             list_injections,
         ])
+        .setup(|app| {
+            crate::watcher::start_db_watcher(app.handle().clone());
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

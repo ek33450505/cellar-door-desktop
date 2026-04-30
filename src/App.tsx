@@ -1,51 +1,47 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { useCallback } from 'react'
+import { Group, Panel, Separator } from 'react-resizable-panels'
+import { Toaster } from 'sonner'
+import { useMemoryStore } from '@/store/memoryStore'
+import { useDbWatcher } from '@/hooks/useDbWatcher'
+import { Sidebar } from '@/components/Sidebar'
+import { CommandPalette } from '@/components/CommandPalette'
+import FactTable from '@/components/FactTable'
+import FtsSearch from '@/components/FtsSearch'
+import TemporalSlider from '@/components/TemporalSlider'
+import InjectionLog from '@/components/InjectionLog'
+import SupersessionChain from '@/components/SupersessionChain'
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const activeView = useMemoryStore(s => s.activeView)
+  const refresh = useMemoryStore(s => s.refresh)
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+  const stableRefresh = useCallback(() => { refresh() }, [refresh])
+  useDbWatcher(stableRefresh)
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+    <div className="flex h-full bg-zinc-950 text-zinc-200">
+      <Group orientation="horizontal" className="h-full w-full">
+        <Panel defaultSize={18} minSize={14} maxSize={28}>
+          <Sidebar />
+        </Panel>
+        <Separator className="w-px bg-zinc-800 hover:bg-zinc-600 transition-colors cursor-col-resize" />
+        <Panel>
+          <main className="h-full overflow-auto p-4">
+            {activeView === 'table' && <FactTable />}
+            {activeView === 'fts' && <FtsSearch />}
+            {activeView === 'temporal' && <TemporalSlider />}
+            {activeView === 'injections' && <InjectionLog />}
+          </main>
+        </Panel>
+      </Group>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
+      {/* SupersessionChain is a Dialog — rendered globally regardless of activeView */}
+      <SupersessionChain />
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
-  );
+      <CommandPalette />
+      <Toaster richColors position="bottom-right" />
+    </div>
+  )
 }
 
-export default App;
+export default App
