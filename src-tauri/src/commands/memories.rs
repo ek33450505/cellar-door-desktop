@@ -3,6 +3,7 @@ use rusqlite::params;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MemoryRow {
     pub id: i64,
     pub agent: String,

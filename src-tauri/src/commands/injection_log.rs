@@ -3,6 +3,7 @@ use rusqlite::params;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InjectionRow {
     pub id: i64,
     pub session_id: String,
