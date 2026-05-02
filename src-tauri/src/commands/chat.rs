@@ -94,8 +94,3 @@ pub async fn send_chat(
 
     Ok(())
 }
-
-#[tauri::command]
-pub async fn list_models() -> Result<Vec<String>, String> {
-    crate::ollama::list_models().await
-}

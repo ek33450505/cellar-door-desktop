@@ -21,7 +21,7 @@ export const sendChat = (
   invoke('send_chat', { model, messages, top_k: topK })
 
 export const listModels = (): Promise<string[]> =>
-  invoke<string[]>('list_models')
+  invoke<string[]>('ollama_models')
 
 export const getMemoryContext = (
   prompt: string,
