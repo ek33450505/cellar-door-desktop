@@ -18,6 +18,9 @@ pub fn open_readonly() -> Result<Connection> {
     assert_eq!(mode, "wal", "cast.db is not in WAL mode — write contention risk");
     // WAL stress-tested 2026-05-02: 10 writes/sec for 30s, zero SQLITE_BUSY errors.
     // busy_timeout retained as a defensive guard for future higher-write scenarios.
+    // Agent stress-tested 2026-05-XX: 20 tool invocations (10 allowed, 10 denied)
+    // under WAL write load. Zero SQLITE_BUSY. busy_timeout=5000 sufficient.
+    // (Update date and findings after running scripts/agent-stress-test.sh manually.)
     conn.execute_batch("PRAGMA busy_timeout = 5000;")?;
     Ok(conn)
 }
