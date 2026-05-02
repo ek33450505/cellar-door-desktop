@@ -20,11 +20,15 @@ pub struct MemoryFact {
 /// Retrieve mode emits a JSON array on stdout by default.
 /// `--fts-only` skips the Ollama embed call (cosine_sim=0.0) so latency stays
 /// in the 10–30 ms range, matching the Phase 2 <100 ms p95 budget.
+///
+/// `top_n` is capped at 50 to prevent a caller from issuing an unbounded
+/// subprocess invocation (DOS guard — security review finding).
 pub fn query_relevant_facts(
     prompt: &str,
     top_n: usize,
     agent: &str,
 ) -> Result<Vec<MemoryFact>, String> {
+    let top_n = top_n.min(50);  // DOS guard — security review finding
     let router_path =
         shellexpand::tilde("~/.claude/scripts/cast-memory-router.py").to_string();
     let output = Command::new("python3")
