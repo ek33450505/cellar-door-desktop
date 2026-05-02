@@ -55,7 +55,7 @@ function FilterSelect({ label, value, options, onChange }: FilterSelectProps) {
             >
               <Select.ItemText>All</Select.ItemText>
             </Select.Item>
-            {options.map((opt) => (
+            {options.filter((opt) => opt !== '').map((opt) => (
               <Select.Item
                 key={opt}
                 value={opt}
