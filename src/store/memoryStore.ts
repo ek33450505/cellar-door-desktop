@@ -8,7 +8,7 @@ import {
 } from '@/lib/tauri'
 import type { MemoryRow, InjectionRow } from '@/lib/tauri'
 
-export type ActiveView = 'table' | 'chain' | 'temporal' | 'fts' | 'injections' | 'chat'
+export type ActiveView = 'table' | 'chain' | 'temporal' | 'fts' | 'injections' | 'chat' | 'tool-log'
 
 export interface MemoryFilters {
   agent?: string
@@ -148,6 +148,9 @@ export const useMemoryStore = create<MemoryStore>((set, get) => ({
         return get().fetchFts()
       case 'injections':
         return get().fetchInjections()
+      case 'tool-log':
+        // tool-log manages its own refresh via local state; no-op here
+        return
     }
   },
 

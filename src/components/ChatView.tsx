@@ -1,19 +1,29 @@
 import { useRef, useEffect, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { Send } from 'lucide-react'
 import { useChatStore } from '@/store/chatStore'
 import { sendChat } from '@/lib/ollama'
 import { OllamaStatusBanner } from './OllamaStatusBanner'
 import { ModelSelector } from './ModelSelector'
+import { AgentModeToggle } from './AgentModeToggle'
+import { PermissionConsole } from './PermissionConsole'
+import type { ToolLogEntry } from './PermissionConsole'
+import { useToolEvents } from '@/hooks/useToolEvents'
 
 export default function ChatView() {
   const messages = useChatStore(s => s.messages)
   const isStreaming = useChatStore(s => s.isStreaming)
   const ollamaStatus = useChatStore(s => s.ollamaStatus)
   const model = useChatStore(s => s.model)
+  const agentMode = useChatStore(s => s.agentMode)
+  const agentSessionId = useChatStore(s => s.agentSessionId)
   const addUserMessage = useChatStore(s => s.addUserMessage)
 
   const [input, setInput] = useState('')
+  const [toolEntries, setToolEntries] = useState<ToolLogEntry[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  useToolEvents(updater => setToolEntries(updater))
   const prefersReducedMotion =
     typeof window !== 'undefined' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -33,11 +43,22 @@ export default function ChatView() {
     if (!text || isDisabled) return
     setInput('')
     addUserMessage(text)
+    const currentMessages = [
+      ...messages.map(m => ({ role: m.role, content: m.content })),
+      { role: 'user' as const, content: text },
+    ]
     try {
-      await sendChat(model, [
-        ...messages.map(m => ({ role: m.role, content: m.content })),
-        { role: 'user', content: text },
-      ])
+      if (agentMode) {
+        await invoke('start_agent_turn', {
+          model,
+          messages: currentMessages,
+          topK: 5,
+          sessionId: agentSessionId,
+        })
+      } else {
+        // 7b path — unchanged
+        await sendChat(model, currentMessages)
+      }
     } catch {
       // errors surface via ollama-failed event — no inline triage
     }
@@ -57,6 +78,9 @@ export default function ChatView() {
         <span className="text-sm font-semibold text-zinc-300">Chat</span>
         <ModelSelector />
       </div>
+
+      {/* Agent mode toggle */}
+      <AgentModeToggle />
 
       {/* Status banner */}
       <OllamaStatusBanner />
@@ -96,6 +120,13 @@ export default function ChatView() {
         ))}
         <div ref={bottomRef} />
       </ul>
+
+      {/* Permission console — visible in agent mode */}
+      {agentMode && (
+        <div className="h-48 shrink-0">
+          <PermissionConsole entries={toolEntries} />
+        </div>
+      )}
 
       {/* Input bar */}
       <div className="flex items-end gap-2 px-4 py-3 border-t border-zinc-800 bg-zinc-900">

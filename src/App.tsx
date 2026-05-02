@@ -12,6 +12,7 @@ import TemporalSlider from '@/components/TemporalSlider'
 import InjectionLog from '@/components/InjectionLog'
 import SupersessionChain from '@/components/SupersessionChain'
 import ChatView from '@/components/ChatView'
+import ToolLogPage from '@/pages/ToolLogPage'
 
 function App() {
   const activeView = useMemoryStore(s => s.activeView)
@@ -35,6 +36,7 @@ function App() {
             {activeView === 'temporal' && <TemporalSlider />}
             {activeView === 'injections' && <InjectionLog />}
             {activeView === 'chat' && <ChatView />}
+            {activeView === 'tool-log' && <ToolLogPage />}
           </main>
         </Panel>
       </Group>

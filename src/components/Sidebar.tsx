@@ -1,4 +1,4 @@
-import { Database, Clock, Search, Activity, MessageSquare } from 'lucide-react'
+import { Database, Clock, Search, Activity, MessageSquare, History } from 'lucide-react'
 import { useMemoryStore } from '@/store/memoryStore'
 import type { ActiveView } from '@/store/memoryStore'
 
@@ -14,6 +14,7 @@ const NAV_ITEMS: NavItem[] = [
   { view: 'fts', label: 'FTS Search', icon: <Search size={18} aria-hidden="true" /> },
   { view: 'injections', label: 'Injections', icon: <Activity size={18} aria-hidden="true" /> },
   { view: 'chat', label: 'Chat', icon: <MessageSquare size={18} aria-hidden="true" /> },
+  { view: 'tool-log', label: 'Tool Log', icon: <History size={18} aria-hidden="true" /> },
 ]
 
 export function Sidebar() {

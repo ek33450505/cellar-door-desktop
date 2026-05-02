@@ -53,3 +53,24 @@ export const ftsSearch = (query: string, limit?: number) =>
 
 export const listInjections = (sessionId?: string, limit?: number) =>
   invoke<InjectionRow[]>('list_injections', { session_id: sessionId, limit })
+
+// Wire format from Rust ToolInvocationRow (serde rename_all = "camelCase")
+export type ToolInvocationRow = {
+  id: number
+  sessionId: string
+  callId: string
+  toolName: string
+  scope: string
+  arguments: string
+  decision: string
+  result: string | null
+  error: string | null
+  durationMs: number | null
+  invokedAt: number
+}
+
+export const listToolInvocations = (sessionId?: string, limit?: number) =>
+  invoke<ToolInvocationRow[]>('list_tool_invocations', {
+    session_id: sessionId,
+    limit,
+  })

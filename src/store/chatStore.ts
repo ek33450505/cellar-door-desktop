@@ -12,6 +12,8 @@ export interface ChatStore {
   model: string
   availableModels: string[]
   ollamaStatus: 'ready' | 'error' | 'dead' | 'unknown'
+  agentMode: boolean
+  agentSessionId: string | null
   addUserMessage: (content: string) => void
   appendToken: (token: string) => void
   finalizeAssistant: () => void
@@ -19,6 +21,7 @@ export interface ChatStore {
   setAvailableModels: (models: string[]) => void
   setOllamaStatus: (status: ChatStore['ollamaStatus']) => void
   clearChat: () => void
+  setAgentMode: (enabled: boolean) => void
 }
 
 export const useChatStore = create<ChatStore>((set) => ({
@@ -27,6 +30,8 @@ export const useChatStore = create<ChatStore>((set) => ({
   model: 'mistral',
   availableModels: [],
   ollamaStatus: 'unknown',
+  agentMode: false,
+  agentSessionId: null,
 
   addUserMessage: (content) =>
     set((state) => ({
@@ -66,4 +71,9 @@ export const useChatStore = create<ChatStore>((set) => ({
   setOllamaStatus: (ollamaStatus) => set({ ollamaStatus }),
 
   clearChat: () => set({ messages: [], isStreaming: false }),
+
+  setAgentMode: (enabled) =>
+    set(enabled
+      ? { agentMode: true, agentSessionId: crypto.randomUUID() }
+      : { agentMode: false }),
 }))
