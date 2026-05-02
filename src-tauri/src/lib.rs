@@ -1,3 +1,4 @@
+pub mod agent_loop;
 mod commands;
 mod db;
 mod memory_router;
@@ -6,6 +7,7 @@ pub mod permissions;
 pub mod tools;
 mod watcher;
 
+use commands::agent::{resolve_tool_decision, start_agent_turn};
 use commands::chat::send_chat;
 use commands::injection_log::list_injections;
 use commands::memories::{fts_search, list_memories, memories_at, supersession_chain};
@@ -13,8 +15,10 @@ use commands::tool_log::list_tool_invocations;
 use memory_router::get_memory_context;
 use notify::RecommendedWatcher;
 use ollama::{ollama_health, ollama_models, OllamaSidecar};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::Manager;
+use tokio::sync::oneshot;
 
 pub struct AppState {
     pub watcher: Mutex<Option<RecommendedWatcher>>,
@@ -22,6 +26,10 @@ pub struct AppState {
     /// None if Ollama was already running when the app started (we didn't spawn it),
     /// or if Ollama is not installed.
     pub ollama: Mutex<Option<OllamaSidecar>>,
+    /// Pending tool permission decisions keyed by call_id.
+    /// The agent loop inserts a Sender here before emitting `chat-tool-pending`;
+    /// `resolve_tool_decision` finds the Sender by call_id and sends the decision.
+    pub tool_decisions: Mutex<HashMap<String, oneshot::Sender<String>>>,
 }
 
 #[tauri::command]
@@ -50,6 +58,8 @@ pub fn run() {
             get_memory_context,
             send_chat,
             list_tool_invocations,
+            start_agent_turn,
+            resolve_tool_decision,
         ])
         .setup(|app| {
             let watcher = crate::watcher::start_db_watcher(app.handle().clone())
@@ -57,6 +67,7 @@ pub fn run() {
             app.manage(AppState {
                 watcher: Mutex::new(Some(watcher)),
                 ollama: Mutex::new(None),
+                tool_decisions: Mutex::new(HashMap::new()),
             });
             // Spawn ollama in a background async task — must not block setup.
             // Emits `ollama-ready` on success, `ollama-failed` (with reason) on failure.
