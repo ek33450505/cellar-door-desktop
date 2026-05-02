@@ -26,6 +26,12 @@
     }
   },
   "plugins": {
+    "shell": {
+      "scope": [
+        { "name": "ollama-serve", "cmd": "ollama", "args": ["serve"] },
+        { "name": "ollama-list",  "cmd": "ollama", "args": ["list"] }
+      ]
+    },
     "updater": {
       "pubkey": "",
       "endpoints": [
