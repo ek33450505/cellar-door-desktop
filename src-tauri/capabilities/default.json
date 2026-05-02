@@ -5,6 +5,14 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "opener:default"
+    "opener:default",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        { "name": "ollama-serve", "cmd": "ollama", "args": ["serve"] },
+        { "name": "ollama-list",  "cmd": "ollama", "args": ["list"] }
+      ]
+    },
+    "shell:allow-kill"
   ]
 }
