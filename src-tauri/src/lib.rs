@@ -3,6 +3,7 @@ mod db;
 mod memory_router;
 mod ollama;
 pub mod permissions;
+pub mod tools;
 mod watcher;
 
 use commands::chat::send_chat;
