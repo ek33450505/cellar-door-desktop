@@ -1,16 +1,21 @@
 mod commands;
 mod db;
+mod ollama;
 mod watcher;
 
 use commands::injection_log::list_injections;
 use commands::memories::{fts_search, list_memories, memories_at, supersession_chain};
 use notify::RecommendedWatcher;
+use ollama::{ollama_health, ollama_models, OllamaSidecar};
 use std::sync::Mutex;
 use tauri::Manager;
 
 pub struct AppState {
     pub watcher: Mutex<Option<RecommendedWatcher>>,
-    // ollama child process added in Task 3
+    /// Holds the spawned `ollama serve` child process.
+    /// None if Ollama was already running when the app started (we didn't spawn it),
+    /// or if Ollama is not installed.
+    pub ollama: Mutex<Option<OllamaSidecar>>,
 }
 
 #[tauri::command]
@@ -26,6 +31,7 @@ fn ping_db() -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             ping_db,
             list_memories,
@@ -33,13 +39,21 @@ pub fn run() {
             memories_at,
             fts_search,
             list_injections,
+            ollama_health,
+            ollama_models,
         ])
         .setup(|app| {
             let watcher = crate::watcher::start_db_watcher(app.handle().clone())
                 .expect("db watcher init failed");
             app.manage(AppState {
                 watcher: Mutex::new(Some(watcher)),
+                ollama: Mutex::new(None),
             });
+            // Spawn ollama in a background async task — must not block setup.
+            // Emits `ollama-ready` on success, `ollama-failed` (with reason) on failure.
+            // If Ollama is not installed the app remains fully launchable —
+            // inspector views from Phase 7a are unaffected.
+            ollama::start_ollama(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
