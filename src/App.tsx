@@ -1,5 +1,4 @@
 import { useCallback } from 'react'
-import { Group, Panel, Separator } from 'react-resizable-panels'
 import { Toaster } from 'sonner'
 import { useMemoryStore } from '@/store/memoryStore'
 import { useDbWatcher } from '@/hooks/useDbWatcher'
@@ -24,26 +23,18 @@ function App() {
 
   return (
     <div className="flex h-full bg-zinc-950 text-zinc-200">
-      <Group orientation="horizontal" className="h-full w-full">
-        <Panel defaultSize={18} minSize={14} maxSize={28}>
-          <Sidebar />
-        </Panel>
-        <Separator className="w-px bg-zinc-800 hover:bg-zinc-600 transition-colors cursor-col-resize" />
-        <Panel>
-          <main className="h-full overflow-auto p-4">
-            {activeView === 'table' && <FactTable />}
-            {activeView === 'fts' && <FtsSearch />}
-            {activeView === 'temporal' && <TemporalSlider />}
-            {activeView === 'injections' && <InjectionLog />}
-            {activeView === 'chat' && <ChatView />}
-            {activeView === 'tool-log' && <ToolLogPage />}
-          </main>
-        </Panel>
-      </Group>
-
-      {/* SupersessionChain is a Dialog — rendered globally regardless of activeView */}
+      <aside className="flex-shrink-0 border-r border-zinc-800 w-[200px]">
+        <Sidebar />
+      </aside>
+      <main className="flex-1 h-full overflow-auto p-4">
+        {activeView === 'table' && <FactTable />}
+        {activeView === 'fts' && <FtsSearch />}
+        {activeView === 'temporal' && <TemporalSlider />}
+        {activeView === 'injections' && <InjectionLog />}
+        {activeView === 'chat' && <ChatView />}
+        {activeView === 'tool-log' && <ToolLogPage />}
+      </main>
       <SupersessionChain />
-
       <CommandPalette />
       <Toaster richColors position="bottom-right" />
     </div>
