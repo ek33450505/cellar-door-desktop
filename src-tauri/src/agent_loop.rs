@@ -28,6 +28,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::oneshot;
 
 use crate::db::{self, ToolInvocationRecord};
+use crate::permissions::PermissionGrant;
 use crate::tools::executor::execute_tool;
 use crate::tools::registry::ollama_tools_json;
 
@@ -172,55 +173,86 @@ async fn process_tool_calls(
             .map(|t| format!("{:?}", t.scope))
             .unwrap_or_else(|| "unknown".to_string());
 
-        // 1. Emit chat-tool-pending — frontend shows permission dialog.
-        let _ = app.emit(
-            "chat-tool-pending",
-            json!({
-                "call_id": call_id,
-                "tool_name": tool_name,
-                "args": arguments,
-                "scope": scope
-            }),
-        );
-
-        // 2. Register oneshot channel in AppState for this call_id.
-        let (tx, rx) = oneshot::channel::<String>();
-        {
-            let state = app.state::<crate::AppState>();
-            let mut decisions = state.tool_decisions.lock().unwrap();
-            decisions.insert(call_id.clone(), tx);
-        }
-
-        // 3. Wait for decision with timeout.
         let start = Instant::now();
-        let decision = match tokio::time::timeout(DECISION_TIMEOUT, rx).await {
-            Ok(Ok(d)) => d,
-            Ok(Err(_)) => {
-                // Sender dropped without sending — treat as deny.
+
+        // 1. Fast-path: check for pre-approved or pre-denied grant in PermissionStore.
+        //    Lock is dropped immediately after the check — no .await inside this block.
+        let pre_approved: Option<PermissionGrant> = {
+            let state = app.state::<crate::AppState>();
+            let store = state.permissions.lock().expect("permissions lock poisoned");
+            store.check(&tool_name)
+        };
+
+        let decision: String = match pre_approved {
+            Some(PermissionGrant::AllowAlways) | Some(PermissionGrant::AllowSession) => {
+                // Pre-approved: skip dialog and oneshot wait entirely.
+                "pre-approved".to_string()
+            }
+            Some(PermissionGrant::Denied) => {
+                // Pre-denied: skip dialog, go straight to deny path.
                 "deny".to_string()
             }
-            Err(_elapsed) => {
-                // 120s timeout.
+            // AllowOnce or no stored grant: fall through to interactive prompt.
+            _ => {
+                // 1a. Emit chat-tool-pending — frontend shows permission dialog.
                 let _ = app.emit(
-                    "chat-tool-timeout",
+                    "chat-tool-pending",
                     json!({
                         "call_id": call_id,
                         "tool_name": tool_name,
-                        "session_id": session_id
+                        "args": arguments,
+                        "scope": scope
                     }),
                 );
-                // Remove the orphaned sender entry.
-                let state = app.state::<crate::AppState>();
-                let mut decisions = state.tool_decisions.lock().unwrap();
-                decisions.remove(&call_id);
 
-                return Ok(true); // Signal caller to break the loop.
+                // 1b. Register oneshot channel in AppState for this call_id.
+                let (tx, rx) = oneshot::channel::<String>();
+                {
+                    let state = app.state::<crate::AppState>();
+                    let mut decisions = state.tool_decisions.lock().unwrap();
+                    decisions.insert(call_id.clone(), tx);
+                }
+
+                // 1c. Wait for decision with timeout.
+                match tokio::time::timeout(DECISION_TIMEOUT, rx).await {
+                    Ok(Ok(d)) => d,
+                    Ok(Err(_)) => {
+                        // Sender dropped without sending — treat as deny.
+                        "deny".to_string()
+                    }
+                    Err(_elapsed) => {
+                        // 120s timeout.
+                        let _ = app.emit(
+                            "chat-tool-timeout",
+                            json!({
+                                "call_id": call_id,
+                                "tool_name": tool_name,
+                                "session_id": session_id
+                            }),
+                        );
+                        // Remove the orphaned sender entry.
+                        let state = app.state::<crate::AppState>();
+                        let mut decisions = state.tool_decisions.lock().unwrap();
+                        decisions.remove(&call_id);
+
+                        return Ok(true); // Signal caller to break the loop.
+                    }
+                }
             }
         };
-        let duration_start = Instant::now();
-        let _ = duration_start; // Used below for timing.
 
-        // 4. Handle denied decision — log, inject error, continue loop.
+        // 2. Record the grant decision in the PermissionStore.
+        //    Lock is dropped immediately — no .await inside this block.
+        {
+            let grant = decision_str_to_grant(&decision);
+            if let Some(g) = grant {
+                let state = app.state::<crate::AppState>();
+                let mut store = state.permissions.lock().expect("permissions lock poisoned");
+                store.record(&tool_name, g);
+            }
+        }
+
+        // 3. Handle denied decision — log, inject error, continue loop.
         if decision == "deny" {
             let _ = db::log_tool_invocation(&ToolInvocationRecord {
                 session_id: session_id.to_string(),
@@ -253,7 +285,7 @@ async fn process_tool_calls(
             continue; // Next tool call in this batch.
         }
 
-        // 5. Execute the tool.
+        // 4. Execute the tool.
         let exec_start = Instant::now();
         match execute_tool(&tool_name, arguments.clone()) {
             Ok(result) => {
@@ -365,6 +397,20 @@ fn extract_json_fence_call(content: &str) -> Option<Value> {
         }
     }
     None
+}
+
+/// Map a decision string received from the frontend (or synthesised for pre-approved paths)
+/// to a `PermissionGrant` for storage in `PermissionStore`.
+///
+/// Returns `None` for `"pre-approved"` (already stored — no-op) and for unknown strings.
+fn decision_str_to_grant(decision: &str) -> Option<PermissionGrant> {
+    match decision {
+        "deny" => Some(PermissionGrant::Denied),
+        "once" => Some(PermissionGrant::AllowOnce),
+        "session" => Some(PermissionGrant::AllowSession),
+        "always" => Some(PermissionGrant::AllowAlways),
+        _ => None,
+    }
 }
 
 /// Generate a random UUID v4 string (uses timestamp + counter as lightweight substitute).
@@ -524,5 +570,63 @@ Some text
     #[test]
     fn max_iterations_constant_is_ten() {
         assert_eq!(MAX_ITERATIONS, 10);
+    }
+
+    // -------------------------------------------------------------------------
+    // decision_str_to_grant mapping tests
+    //
+    // These exercise the pure helper that maps decision strings to PermissionGrant
+    // variants. The fast-path logic in process_tool_calls delegates to this helper,
+    // so testing the helper gives coverage of the mapping contract without requiring
+    // a live Tauri AppHandle.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn decision_str_to_grant_deny() {
+        assert!(matches!(
+            decision_str_to_grant("deny"),
+            Some(PermissionGrant::Denied)
+        ));
+    }
+
+    #[test]
+    fn decision_str_to_grant_once() {
+        assert!(matches!(
+            decision_str_to_grant("once"),
+            Some(PermissionGrant::AllowOnce)
+        ));
+    }
+
+    #[test]
+    fn decision_str_to_grant_session() {
+        assert!(matches!(
+            decision_str_to_grant("session"),
+            Some(PermissionGrant::AllowSession)
+        ));
+    }
+
+    #[test]
+    fn decision_str_to_grant_always() {
+        assert!(matches!(
+            decision_str_to_grant("always"),
+            Some(PermissionGrant::AllowAlways)
+        ));
+    }
+
+    /// "pre-approved" must return None so the store.record() call is skipped
+    /// (the grant is already stored — recording again would be a no-op at best,
+    /// or could double-persist at worst).
+    #[test]
+    fn decision_str_to_grant_pre_approved_is_none() {
+        assert!(
+            decision_str_to_grant("pre-approved").is_none(),
+            "pre-approved must not be recorded again"
+        );
+    }
+
+    #[test]
+    fn decision_str_to_grant_unknown_is_none() {
+        assert!(decision_str_to_grant("unknown_value").is_none());
+        assert!(decision_str_to_grant("").is_none());
     }
 }

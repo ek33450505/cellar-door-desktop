@@ -15,6 +15,7 @@ use commands::tool_log::list_tool_invocations;
 use memory_router::get_memory_context;
 use notify::RecommendedWatcher;
 use ollama::{ollama_health, ollama_models, OllamaSidecar};
+use permissions::PermissionStore;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -30,6 +31,9 @@ pub struct AppState {
     /// The agent loop inserts a Sender here before emitting `chat-tool-pending`;
     /// `resolve_tool_decision` finds the Sender by call_id and sends the decision.
     pub tool_decisions: Mutex<HashMap<String, oneshot::Sender<String>>>,
+    /// Session-scoped and persistent (AllowAlways) permission grants.
+    /// Loaded from ~/.config/cellar-door/permissions.json at startup.
+    pub permissions: Mutex<PermissionStore>,
 }
 
 #[tauri::command]
@@ -68,6 +72,7 @@ pub fn run() {
                 watcher: Mutex::new(Some(watcher)),
                 ollama: Mutex::new(None),
                 tool_decisions: Mutex::new(HashMap::new()),
+                permissions: Mutex::new(PermissionStore::new()),
             });
             // Spawn ollama in a background async task — must not block setup.
             // Emits `ollama-ready` on success, `ollama-failed` (with reason) on failure.
