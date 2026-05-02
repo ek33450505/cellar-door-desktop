@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { listen } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
 import { useChatStore } from '@/store/chatStore'
 import type { ChatStore } from '@/store/chatStore'
 
@@ -29,6 +30,18 @@ export function useOllamaEvents() {
         }
       },
     )
+
+    // Query current health state after listeners are registered so we don't
+    // miss a slightly-late ollama-ready event but also don't rely on it as
+    // the sole source of truth.
+    invoke<boolean>('ollama_health')
+      .then(healthy => {
+        if (healthy) setOllamaStatus('ready')
+      })
+      .catch(() => {
+        // health check failure — leave status at default 'unknown'
+        // the polling loop's ollama-failed event will surface real errors
+      })
 
     return () => {
       unlistenStatus.then(f => f())

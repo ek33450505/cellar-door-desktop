@@ -8,14 +8,23 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(),
 }))
 
-// Import mocked version after vi.mock resolves
+// Mock Tauri core API for invoke calls
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(),
+}))
+
+// Import mocked versions after vi.mock resolves
 import { listen } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
 const mockListen = vi.mocked(listen)
+const mockInvoke = vi.mocked(invoke)
 
 beforeEach(() => {
   const mockUnlisten = vi.fn()
   vi.clearAllMocks()
   mockListen.mockResolvedValue(mockUnlisten)
+  // Default: health check returns false (unhealthy) unless overridden per test
+  mockInvoke.mockResolvedValue(false)
   useChatStore.setState({
     messages: [],
     isStreaming: false,
@@ -94,5 +103,32 @@ describe('useOllamaEvents', () => {
 
     expect(useChatStore.getState().isStreaming).toBe(false)
     expect(useChatStore.getState().messages[0].pending).toBe(false)
+  })
+
+  it('on mount, queries ollama_health and sets status to ready when healthy', async () => {
+    mockInvoke.mockResolvedValue(true)
+
+    renderHook(() => useOllamaEvents())
+    await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('ollama_health'))
+
+    expect(useChatStore.getState().ollamaStatus).toBe('ready')
+  })
+
+  it('on mount, leaves status at unknown when ollama_health returns false', async () => {
+    mockInvoke.mockResolvedValue(false)
+
+    renderHook(() => useOllamaEvents())
+    await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('ollama_health'))
+
+    expect(useChatStore.getState().ollamaStatus).toBe('unknown')
+  })
+
+  it('on mount, leaves status at unknown when ollama_health rejects', async () => {
+    mockInvoke.mockRejectedValue(new Error('invoke failed'))
+
+    renderHook(() => useOllamaEvents())
+    await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('ollama_health'))
+
+    expect(useChatStore.getState().ollamaStatus).toBe('unknown')
   })
 })
