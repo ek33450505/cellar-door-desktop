@@ -68,8 +68,14 @@ pub async fn send_chat(
 
     // 5. Emit chat-token events for each NDJSON chunk
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| e.to_string())?;
-        let line = std::str::from_utf8(&chunk).unwrap_or("").trim().to_string();
+        let chunk_bytes = chunk.map_err(|e| e.to_string())?;
+        let line = match std::str::from_utf8(&chunk_bytes) {
+            Ok(s) => s.trim().to_string(),
+            Err(_e) => {
+                eprintln!("chat: malformed UTF-8 chunk, len={}", chunk_bytes.len());
+                continue;
+            }
+        };
         if line.is_empty() {
             continue;
         }

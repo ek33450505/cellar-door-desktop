@@ -46,8 +46,9 @@ pub fn query_relevant_facts(
         .map_err(|e| format!("failed to spawn router: {e}"))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("router exited non-zero: {stderr}"));
+        let stderr_text = String::from_utf8_lossy(&output.stderr);
+        eprintln!("memory router stderr: {}", stderr_text);
+        return Err("memory router unavailable".into());
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -79,6 +80,10 @@ pub fn facts_to_system_prompt(facts: &[MemoryFact]) -> String {
 // Tauri command
 // ---------------------------------------------------------------------------
 
+/// Agent names permitted to query memory context.
+/// Reject any agent not in this list — security finding from Phase 7b review.
+const ALLOWED_AGENTS: &[&str] = &["shared", "cellar-door-desktop"];
+
 /// Expose memory context retrieval to the frontend for debugging/inspection.
 #[tauri::command]
 pub fn get_memory_context(
@@ -86,5 +91,8 @@ pub fn get_memory_context(
     top_n: usize,
     agent: String,
 ) -> Result<Vec<MemoryFact>, String> {
+    if !ALLOWED_AGENTS.contains(&agent.as_str()) {
+        return Err(format!("agent '{}' not in allowlist", agent));
+    }
     query_relevant_facts(&prompt, top_n, &agent)
 }

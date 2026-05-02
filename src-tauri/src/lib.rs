@@ -8,6 +8,7 @@ mod watcher;
 use commands::chat::send_chat;
 use commands::injection_log::list_injections;
 use commands::memories::{fts_search, list_memories, memories_at, supersession_chain};
+use commands::tool_log::list_tool_invocations;
 use memory_router::get_memory_context;
 use notify::RecommendedWatcher;
 use ollama::{ollama_health, ollama_models, OllamaSidecar};
@@ -47,6 +48,7 @@ pub fn run() {
             ollama_models,
             get_memory_context,
             send_chat,
+            list_tool_invocations,
         ])
         .setup(|app| {
             let watcher = crate::watcher::start_db_watcher(app.handle().clone())
