@@ -52,6 +52,7 @@ export function CommandPalette() {
         <Dialog.Overlay className="fixed inset-0 bg-black/60 z-50" />
         <Dialog.Content
           aria-label="Command palette"
+          aria-describedby={undefined}
           className="fixed top-[20%] left-1/2 -translate-x-1/2 z-50 w-full max-w-lg"
         >
           <Command

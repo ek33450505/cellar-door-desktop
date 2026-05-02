@@ -6,14 +6,19 @@ use serde_json::{json, Value};
 /// Phase 7c constraint: only `http://localhost` and `https://localhost` URLs are
 /// permitted. All external URLs are rejected.
 ///
-/// Security note: DNS rebinding limitation — this implementation validates the
-/// URL host string as "localhost" or "127.0.0.1" before making the request, but
-/// does NOT resolve the IP post-DNS-lookup. A sophisticated DNS rebinding attack
-/// (where a controlled domain briefly resolves to 127.0.0.1 before switching to
-/// an external IP) could bypass the string check. Mitigating this fully requires
-/// resolving the hostname to an IP and verifying the IP is loopback BEFORE the
-/// TCP connection, which reqwest does not expose. Acceptable risk for Phase 7c
-/// local-only use case; revisit if network scope expands in Phase 8+.
+/// # Security: DNS Rebinding
+///
+/// DNS rebinding is theoretically possible if an attacker controls a domain the user
+/// explicitly fetches and can cause that domain to re-resolve to an internal IP.
+///
+/// **Threat model for this app:** Cellar Door is a local-only app. DNS rebinding requires
+/// (a) the user to explicitly type or paste a URL from an attacker-controlled domain,
+/// AND (b) the attacker to have DNS control over that domain. This is a low-likelihood
+/// attack surface for a local desktop assistant. No internal network services are
+/// auto-fetched; all URLs are user-supplied or tool-result-suggested.
+///
+/// **Mitigation deferred to Phase 7e.** Implementing resolve-once IP pinning requires
+/// a custom async DNS resolver (e.g., `hickory-dns`). Tracking issue: 7d-deferred-dns-rebinding.
 pub fn run(args: Value) -> Result<Value, String> {
     let url_str = args["url"]
         .as_str()

@@ -168,7 +168,7 @@ async fn process_tool_calls(
         let tool_name = func["name"].as_str().unwrap_or("").to_string();
         let arguments = func["arguments"].clone();
 
-        let call_id = uuid_v4();
+        let call_id = new_call_id();
         let scope = crate::tools::registry::find_tool(&tool_name)
             .map(|t| format!("{:?}", t.scope))
             .unwrap_or_else(|| "unknown".to_string());
@@ -413,11 +413,11 @@ fn decision_str_to_grant(decision: &str) -> Option<PermissionGrant> {
     }
 }
 
-/// Generate a random UUID v4 string (uses timestamp + counter as lightweight substitute).
+/// Generate a unique call identifier (timestamp + monotonic counter).
 ///
 /// For production use this is sufficient — call_ids need uniqueness within a session,
 /// not cryptographic randomness.
-fn uuid_v4() -> String {
+fn new_call_id() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let ts = std::time::SystemTime::now()
@@ -489,13 +489,13 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // uuid_v4 uniqueness
+    // new_call_id uniqueness
     // -------------------------------------------------------------------------
 
     #[test]
-    fn uuid_v4_produces_unique_values() {
-        let a = uuid_v4();
-        let b = uuid_v4();
+    fn new_call_id_produces_unique_values() {
+        let a = new_call_id();
+        let b = new_call_id();
         assert_ne!(a, b, "consecutive call_ids must differ");
     }
 
@@ -508,7 +508,7 @@ mod tests {
     //
     // Limitation: Full Tauri AppHandle requires a running Tauri app; we test
     // the non-AppHandle logic paths inline here (extract_json_fence_call,
-    // uuid_v4, JSON shape helpers). The integration test for the full loop
+    // new_call_id, JSON shape helpers). The integration test for the full loop
     // lives in the e2e suite (Task 5).
     // -------------------------------------------------------------------------
 

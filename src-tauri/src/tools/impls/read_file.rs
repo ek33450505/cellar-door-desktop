@@ -69,11 +69,17 @@ pub fn run(args: Value) -> Result<Value, String> {
     let expanded = shellexpand::tilde(raw_path).to_string();
     let validated = validate_path(&expanded)?;
 
-    let contents = fs::read_to_string(&validated)
+    // Re-canonicalize at read time to close symlink-swap TOCTOU window.
+    let final_path = std::fs::canonicalize(&validated)
+        .map_err(|e| format!("path error at read time: {e}"))?;
+    // Re-check after re-canonicalization (symlink may now point outside allowed roots).
+    let _ = validate_path(&final_path.to_string_lossy())?;
+
+    let contents = fs::read_to_string(&final_path)
         .map_err(|e| format!("read error: {e}"))?;
 
     Ok(json!({
-        "path": validated.to_string_lossy(),
+        "path": final_path.to_string_lossy(),
         "contents": contents,
         "bytes": contents.len()
     }))

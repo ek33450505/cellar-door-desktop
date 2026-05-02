@@ -35,10 +35,19 @@ pub struct PermissionStore {
 }
 
 fn permissions_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("cellar-door")
-        .join("permissions.json")
+    let base = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    // Linux: canonicalize XDG_CONFIG_HOME to prevent XDG_CONFIG_HOME=/etc/passwd attacks.
+    // On macOS/Windows, dirs::config_dir() is platform-fixed and not injectable via env.
+    #[cfg(target_os = "linux")]
+    let base = if base.exists() {
+        std::fs::canonicalize(&base).unwrap_or(base)
+    } else {
+        base
+    };
+
+    base.join("cellar-door").join("permissions.json")
 }
 
 fn load_persistent() -> HashMap<String, PermissionGrant> {

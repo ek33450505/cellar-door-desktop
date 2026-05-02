@@ -85,7 +85,13 @@ pub fn run(args: Value) -> Result<Value, String> {
     let expanded = shellexpand::tilde(raw_path).to_string();
     let validated = validate_path(&expanded)?;
 
-    let entries: Vec<Value> = fs::read_dir(&validated)
+    // Re-canonicalize at read time to close symlink-swap TOCTOU window.
+    let final_path = std::fs::canonicalize(&validated)
+        .map_err(|e| format!("path error at read time: {e}"))?;
+    // Re-check after re-canonicalization (symlink may now point outside allowed roots).
+    let _ = validate_path(&final_path.to_string_lossy())?;
+
+    let entries: Vec<Value> = fs::read_dir(&final_path)
         .map_err(|e| format!("read_dir error: {e}"))?
         .filter_map(|entry| {
             let entry = entry.ok()?;
@@ -95,7 +101,7 @@ pub fn run(args: Value) -> Result<Value, String> {
         })
         .collect();
 
-    Ok(json!({ "path": validated.to_string_lossy(), "entries": entries }))
+    Ok(json!({ "path": final_path.to_string_lossy(), "entries": entries }))
 }
 
 #[cfg(test)]
