@@ -122,4 +122,50 @@ describe('TemporalSlider', () => {
     render(<TemporalSlider />)
     expect(screen.getByText('Time travel to date')).toBeInTheDocument()
   })
+
+  it('shows empty-state when all memories have invalid (empty-string) validFrom', () => {
+    // rows with validFrom='' → new Date('').getTime() === NaN
+    // After NaN filter, no valid epochs remain → epochBounds is null → empty state shown
+    const nanMemories: MemoryRow[] = [
+      makeRow({ id: 1, validFrom: '', name: 'nan-row' }),
+    ]
+    useMemoryStore.setState({ memories: nanMemories, temporalTs: null })
+    render(<TemporalSlider />)
+    // Falls through to the empty-state branch, not the slider branch
+    expect(
+      screen.getByText('No memories loaded — switch to Fact Table first to populate the time range.')
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('slider')).not.toBeInTheDocument()
+  })
+
+  it('handles mixed valid and invalid validFrom — shows empty state when only one unique epoch', () => {
+    // One NaN + one valid = single unique timestamp → min === max → slider collapses → empty state
+    const mixedMemories: MemoryRow[] = [
+      makeRow({ id: 1, validFrom: '', name: 'nan-row' }),
+      makeRow({ id: 2, validFrom: '2026-01-01T00:00:00Z', name: 'valid-row' }),
+    ]
+    useMemoryStore.setState({ memories: mixedMemories, temporalTs: '2026-01-01T00:00:00Z' })
+    render(<TemporalSlider />)
+    // Single unique epoch → epochBounds is null → empty state
+    expect(
+      screen.getByText('No memories loaded — switch to Fact Table first to populate the time range.')
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('slider')).not.toBeInTheDocument()
+  })
+
+  it('renders slider when multiple valid unique epochs exist among mixed rows', () => {
+    // Two different valid epochs + one NaN → range is non-zero → slider renders
+    const mixedMemories: MemoryRow[] = [
+      makeRow({ id: 1, validFrom: '', name: 'nan-row' }),
+      makeRow({ id: 2, validFrom: '2026-01-01T00:00:00Z', name: 'valid-early' }),
+      makeRow({ id: 3, validFrom: '2026-03-01T00:00:00Z', name: 'valid-late' }),
+    ]
+    useMemoryStore.setState({ memories: mixedMemories, temporalTs: '2026-03-01T00:00:00Z' })
+    render(<TemporalSlider />)
+    const slider = screen.getByRole('slider', { name: 'Time travel to date' })
+    expect(slider).toBeInTheDocument()
+    expect(slider).not.toHaveAttribute('aria-valuenow', 'NaN')
+    expect(slider).not.toHaveAttribute('aria-valuemin', 'NaN')
+    expect(slider).not.toHaveAttribute('aria-valuemax', 'NaN')
+  })
 })

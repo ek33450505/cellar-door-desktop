@@ -34,15 +34,26 @@ export default function TemporalSlider() {
   const setTemporalTs = useMemoryStore((s) => s.setTemporalTs)
   const fetchAt = useMemoryStore((s) => s.fetchAt)
 
-  // Epoch bounds from validFrom values in loaded memories
-  const { minMs, maxMs } = useMemo(() => {
-    if (memories.length === 0) return { minMs: 0, maxMs: 0 }
-    const epochs = memories.map((m) => new Date(m.validFrom).getTime())
-    return { minMs: Math.min(...epochs), maxMs: Math.max(...epochs) }
+  // Epoch bounds from validFrom values in loaded memories.
+  // Filter NaN epochs first — rows with validFrom='' produce NaN via new Date('').getTime().
+  // Returns null when no valid epochs exist so the caller can show the empty state.
+  const epochBounds = useMemo(() => {
+    if (memories.length === 0) return null
+    const epochs = memories
+      .map((m) => new Date(m.validFrom).getTime())
+      .filter((ms) => !isNaN(ms))
+    if (epochs.length === 0) return null
+    const minMs = Math.min(...epochs)
+    const maxMs = Math.max(...epochs)
+    // Single unique timestamp — slider needs a non-zero range to function correctly.
+    if (minMs === maxMs) return null
+    return { minMs, maxMs }
   }, [memories])
 
   // Current slider value — default to maxMs (most recent)
-  const currentMs = temporalTs ? new Date(temporalTs).getTime() : maxMs
+  const currentMs = temporalTs
+    ? new Date(temporalTs).getTime()
+    : (epochBounds?.maxMs ?? 0)
 
   // Debounced handler: updates store then fetches
   const debouncedFetch = useDebounce(
@@ -61,8 +72,8 @@ export default function TemporalSlider() {
     debouncedFetch(iso)
   }
 
-  // No memories loaded — instruct user to load them first
-  if (memories.length === 0) {
+  // No memories loaded, or all validFrom values are invalid — instruct user to load first
+  if (!epochBounds) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center">
         <p className="text-sm text-zinc-500">
@@ -72,6 +83,7 @@ export default function TemporalSlider() {
     )
   }
 
+  const { minMs, maxMs } = epochBounds
   const selectedDate = new Date(currentMs).toLocaleString()
 
   return (

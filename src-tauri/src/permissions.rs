@@ -24,8 +24,11 @@ pub enum PermissionGrant {
 }
 
 /// Session-scoped permission state (in-memory, cleared on app exit).
-/// Persistent grants for ReadOnly tools are loaded from
-/// ~/.config/cellar-door/permissions.json at startup.
+/// Persistent grants for ReadOnly tools are loaded from the platform config
+/// directory at startup:
+///   macOS:   ~/Library/Application Support/cellar-door/permissions.json
+///   Linux:   $XDG_CONFIG_HOME/cellar-door/permissions.json (default: ~/.config)
+///   Windows: %APPDATA%/cellar-door/permissions.json
 pub struct PermissionStore {
     session: HashMap<String, PermissionGrant>,   // key: tool_name
     persistent: HashMap<String, PermissionGrant>, // loaded from disk
