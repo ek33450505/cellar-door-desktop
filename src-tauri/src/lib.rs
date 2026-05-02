@@ -4,6 +4,14 @@ mod watcher;
 
 use commands::injection_log::list_injections;
 use commands::memories::{fts_search, list_memories, memories_at, supersession_chain};
+use notify::RecommendedWatcher;
+use std::sync::Mutex;
+use tauri::Manager;
+
+pub struct AppState {
+    pub watcher: Mutex<Option<RecommendedWatcher>>,
+    // ollama child process added in Task 3
+}
 
 #[tauri::command]
 fn ping_db() -> Result<String, String> {
@@ -27,7 +35,11 @@ pub fn run() {
             list_injections,
         ])
         .setup(|app| {
-            crate::watcher::start_db_watcher(app.handle().clone());
+            let watcher = crate::watcher::start_db_watcher(app.handle().clone())
+                .expect("db watcher init failed");
+            app.manage(AppState {
+                watcher: Mutex::new(Some(watcher)),
+            });
             Ok(())
         })
         .run(tauri::generate_context!())

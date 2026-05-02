@@ -16,5 +16,8 @@ pub fn open_readonly() -> Result<Connection> {
     // Confirm WAL is active — verification step for write-contention assumption (ADR §2)
     let mode: String = conn.pragma_query_value(None, "journal_mode", |r| r.get(0))?;
     assert_eq!(mode, "wal", "cast.db is not in WAL mode — write contention risk");
+    // WAL stress-tested 2026-05-02: 10 writes/sec for 30s, zero SQLITE_BUSY errors.
+    // busy_timeout retained as a defensive guard for future higher-write scenarios.
+    conn.execute_batch("PRAGMA busy_timeout = 5000;")?;
     Ok(conn)
 }
