@@ -12,6 +12,7 @@ import InjectionLog from '@/components/InjectionLog'
 import SupersessionChain from '@/components/SupersessionChain'
 import ChatView from '@/components/ChatView'
 import ToolLogPage from '@/pages/ToolLogPage'
+import { PermissionModal } from '@/components/PermissionModal'
 
 function App() {
   const activeView = useMemoryStore(s => s.activeView)
@@ -35,6 +36,7 @@ function App() {
         {activeView === 'tool-log' && <ToolLogPage />}
       </main>
       <SupersessionChain />
+      <PermissionModal />
       <CommandPalette />
       <Toaster richColors position="bottom-right" />
     </div>
