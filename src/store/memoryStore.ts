@@ -8,7 +8,7 @@ import {
 } from '@/lib/tauri'
 import type { MemoryRow, InjectionRow } from '@/lib/tauri'
 
-export type ActiveView = 'table' | 'chain' | 'temporal' | 'fts' | 'injections'
+export type ActiveView = 'table' | 'chain' | 'temporal' | 'fts' | 'injections' | 'chat'
 
 export interface MemoryFilters {
   agent?: string
