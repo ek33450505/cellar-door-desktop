@@ -15,7 +15,8 @@ pub struct MemoryFact {
 /// Router path: ~/.claude/scripts/cast-memory-router.py
 /// Invoked as:
 ///   python3 ~/.claude/scripts/cast-memory-router.py \
-///       --mode retrieve --agent <agent> --prompt <prompt> --top-n <n> --fts-only
+///       --mode retrieve --agent <agent> --prompt <prompt> --top-n <n> \
+///       [--project <project>] --fts-only
 ///
 /// Retrieve mode emits a JSON array on stdout by default.
 /// `--fts-only` skips the Ollama embed call (cosine_sim=0.0) so latency stays
@@ -23,16 +24,20 @@ pub struct MemoryFact {
 ///
 /// `top_n` is capped at 50 to prevent a caller from issuing an unbounded
 /// subprocess invocation (DOS guard — security review finding).
+///
+/// `project` is an optional project filter derived from workspace basename (Task E-16).
+/// When `Some(p)`, `--project p` is passed to the router before `--fts-only`.
 pub fn query_relevant_facts(
     prompt: &str,
     top_n: usize,
     agent: &str,
+    project: Option<&str>,
 ) -> Result<Vec<MemoryFact>, String> {
     let top_n = top_n.min(50);  // DOS guard — security review finding
     let router_path =
         shellexpand::tilde("~/.claude/scripts/cast-memory-router.py").to_string();
-    let output = Command::new("python3")
-        .arg(&router_path)
+    let mut cmd = Command::new("python3");
+    cmd.arg(&router_path)
         .arg("--mode")
         .arg("retrieve")
         .arg("--agent")
@@ -40,8 +45,15 @@ pub fn query_relevant_facts(
         .arg("--prompt")
         .arg(prompt)
         .arg("--top-n")
-        .arg(top_n.to_string())
-        .arg("--fts-only")
+        .arg(top_n.to_string());
+    // E-16: pass --project when a workspace-derived project name is available.
+    if let Some(p) = project {
+        if !p.is_empty() {
+            cmd.arg("--project").arg(p);
+        }
+    }
+    cmd.arg("--fts-only");
+    let output = cmd
         .output()
         .map_err(|e| format!("failed to spawn router: {e}"))?;
 
@@ -85,14 +97,18 @@ pub fn facts_to_system_prompt(facts: &[MemoryFact]) -> String {
 const ALLOWED_AGENTS: &[&str] = &["shared", "cellar-door-desktop"];
 
 /// Expose memory context retrieval to the frontend for debugging/inspection.
+///
+/// `project` — optional workspace-derived project name for memory scoping (Task E-16).
+/// When provided, passed as `--project` to the router subprocess.
 #[tauri::command]
 pub fn get_memory_context(
     prompt: String,
     top_n: usize,
     agent: String,
+    project: Option<String>,
 ) -> Result<Vec<MemoryFact>, String> {
     if !ALLOWED_AGENTS.contains(&agent.as_str()) {
         return Err(format!("agent '{}' not in allowlist", agent));
     }
-    query_relevant_facts(&prompt, top_n, &agent)
+    query_relevant_facts(&prompt, top_n, &agent, project.as_deref())
 }

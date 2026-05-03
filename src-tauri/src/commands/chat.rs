@@ -32,7 +32,8 @@ pub async fn send_chat(
         .unwrap_or("");
 
     // 2. Memory injection — graceful degradation on failure
-    let facts = query_relevant_facts(user_prompt, top_k, "shared").unwrap_or_default();
+    // No project scoping for the non-agent chat path (no workspace in this command).
+    let facts = query_relevant_facts(user_prompt, top_k, "shared", None).unwrap_or_default();
     let system_content = facts_to_system_prompt(&facts);
 
     // 3. Build Ollama request — prepend system message only when facts are present

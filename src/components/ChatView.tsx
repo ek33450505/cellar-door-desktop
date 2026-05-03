@@ -5,6 +5,7 @@ import { useChatStore } from '@/store/chatStore'
 import { sendChat } from '@/lib/ollama'
 import { OllamaStatusBanner } from './OllamaStatusBanner'
 import { ModelSelector } from './ModelSelector'
+import { WorkspacePicker } from './WorkspacePicker'
 import { AgentModeToggle } from './AgentModeToggle'
 import { PermissionConsole } from './PermissionConsole'
 import type { ToolLogEntry } from './PermissionConsole'
@@ -18,6 +19,9 @@ export default function ChatView() {
   const agentMode = useChatStore(s => s.agentMode)
   const agentSessionId = useChatStore(s => s.agentSessionId)
   const addUserMessage = useChatStore(s => s.addUserMessage)
+  const workspacePath = useChatStore(s =>
+    s.chats.find(c => c.id === s.activeChatId)?.workspacePath ?? null
+  )
 
   const [input, setInput] = useState('')
   const [toolEntries, setToolEntries] = useState<ToolLogEntry[]>([])
@@ -54,6 +58,7 @@ export default function ChatView() {
           messages: currentMessages,
           topK: 5,
           sessionId: agentSessionId,
+          workspacePath: workspacePath ?? null,
         })
       } else {
         // 7b path — unchanged
@@ -76,7 +81,10 @@ export default function ChatView() {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800 bg-zinc-900">
         <span className="text-sm font-semibold text-zinc-300">Chat</span>
-        <ModelSelector />
+        <div className="flex items-center gap-2">
+          <WorkspacePicker />
+          <ModelSelector />
+        </div>
       </div>
 
       {/* Agent mode toggle */}

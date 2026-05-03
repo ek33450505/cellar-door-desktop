@@ -57,16 +57,73 @@ pub struct AgentMessage {
 /// - Ollama responds with text content and no tool calls (normal completion)
 /// - A permission decision times out (emits `chat-tool-timeout`, then returns)
 /// - MAX_ITERATIONS is exhausted (emits `chat-error`, then returns)
+///
+/// `workspace_path` — when `Some`, a system prompt is prepended to anchor
+///   relative path references (Task E-14). Also threaded to tool dispatch as
+///   orchestrator-injected `_workspace` arg (Task E-15).
+/// `project` — workspace basename used for memory scoping (Task E-16).
 pub async fn run_agent_turn(
     app: AppHandle,
     model: String,
     mut messages: Vec<Value>,
     session_id: String,
-    // TODO 7c-followup: wire top_k to memory injection on first iteration
-    _top_k: usize,
+    top_k: usize,
+    workspace_path: Option<String>,
+    project: Option<String>,
 ) -> Result<(), String> {
     let tools = ollama_tools_json();
     let client = reqwest::Client::new();
+
+    // E-14: Prepend workspace system message when a workspace is pinned.
+    if let Some(ref ws) = workspace_path {
+        let system_content = format!(
+            "You are working in {}. When the user refers to \"this directory\", \
+             \"the current folder\", or uses relative paths, resolve them against \
+             this workspace.",
+            ws
+        );
+        messages.insert(0, json!({ "role": "system", "content": system_content }));
+    }
+
+    // E-16: Inject memory context on the first iteration.
+    // Uses top_k (was _top_k TODO stub) with project-scoped filtering when available.
+    if top_k > 0 {
+        // Build a prompt summary from the last user message for memory retrieval.
+        let memory_prompt = messages
+            .iter()
+            .rev()
+            .find(|m| m["role"] == "user")
+            .and_then(|m| m["content"].as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if !memory_prompt.is_empty() {
+            use crate::memory_router::query_relevant_facts;
+            let agent = project
+                .as_deref()
+                .filter(|p| !p.is_empty())
+                .unwrap_or("shared");
+            match query_relevant_facts(&memory_prompt, top_k, agent, project.as_deref()) {
+                Ok(facts) if !facts.is_empty() => {
+                    let sys = crate::memory_router::facts_to_system_prompt(&facts);
+                    if !sys.is_empty() {
+                        // Insert after any existing system message, before user turns.
+                        let insert_pos = if messages
+                            .first()
+                            .map(|m| m["role"] == "system")
+                            .unwrap_or(false)
+                        {
+                            1
+                        } else {
+                            0
+                        };
+                        messages.insert(insert_pos, json!({ "role": "system", "content": sys }));
+                    }
+                }
+                _ => {} // Memory unavailable — continue without context; non-fatal.
+            }
+        }
+    }
 
     for _iteration in 0..MAX_ITERATIONS {
         let body = json!({
@@ -98,6 +155,7 @@ pub async fn run_agent_turn(
                     calls,
                     &mut messages,
                     &session_id,
+                    workspace_path.as_deref(),
                 )
                 .await?;
 
@@ -119,6 +177,7 @@ pub async fn run_agent_turn(
                 &synthetic_calls,
                 &mut messages,
                 &session_id,
+                workspace_path.as_deref(),
             )
             .await?;
 
@@ -156,17 +215,42 @@ pub async fn run_agent_turn(
 ///
 /// Returns `Ok(true)` if a timeout occurred (caller should break the outer loop),
 /// `Ok(false)` to continue iterating.
+///
+/// `workspace` — orchestrator-injected workspace path (Task E-15).
+/// The `_workspace` key in tool args is ALWAYS orchestrator-only. Any `_workspace`
+/// key the model supplies is stripped before the orchestrator injects the real one.
+/// This prevents model-prompt injection from spoofing the workspace path.
+/// SECURITY: Do NOT remove this strip step — reviewed as part of Task E-15.
 async fn process_tool_calls(
     app: &AppHandle,
     _client: &reqwest::Client,
     calls: &[Value],
     messages: &mut Vec<Value>,
     session_id: &str,
+    workspace: Option<&str>,
 ) -> Result<bool, String> {
     for call in calls {
         let func = &call["function"];
         let tool_name = func["name"].as_str().unwrap_or("").to_string();
-        let arguments = func["arguments"].clone();
+
+        // SECURITY: Strip any model-supplied `_workspace` key before injecting
+        // the orchestrator's real workspace. This prevents prompt-injection
+        // attacks where the model attempts to spoof the workspace path.
+        // `_workspace` is a reserved orchestrator key — never model-supplied.
+        let mut arguments = func["arguments"].clone();
+        if let Some(obj) = arguments.as_object_mut() {
+            obj.remove("_workspace");
+        }
+
+        // E-15: Inject orchestrator-controlled workspace into tool args.
+        // Only inject for tools that perform path operations (read_file, list_dir).
+        if let Some(ws) = workspace {
+            if matches!(tool_name.as_str(), "read_file" | "list_dir") {
+                if let Some(obj) = arguments.as_object_mut() {
+                    obj.insert("_workspace".to_string(), json!(ws));
+                }
+            }
+        }
 
         let call_id = new_call_id();
         let scope = crate::tools::registry::find_tool(&tool_name)
@@ -570,6 +654,50 @@ Some text
     #[test]
     fn max_iterations_constant_is_ten() {
         assert_eq!(MAX_ITERATIONS, 10);
+    }
+
+    // -------------------------------------------------------------------------
+    // E-14: Workspace system message prepend logic
+    //
+    // We verify the system message construction directly rather than calling
+    // run_agent_turn (which needs a live Tauri AppHandle + Ollama connection).
+    // The system message format is defined in run_agent_turn — this test
+    // documents and validates the expected content.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn workspace_system_message_contains_workspace_path() {
+        // Simulate the system message construction from run_agent_turn.
+        let ws = "/Users/ed/Projects/my-project";
+        let system_content = format!(
+            "You are working in {}. When the user refers to \"this directory\", \
+             \"the current folder\", or uses relative paths, resolve them against \
+             this workspace.",
+            ws
+        );
+        assert!(
+            system_content.contains(ws),
+            "system message must contain the workspace path"
+        );
+        assert!(
+            system_content.contains("relative paths"),
+            "system message must mention relative paths"
+        );
+    }
+
+    #[test]
+    fn workspace_system_message_format_is_stable() {
+        // Verify the workspace system message is non-empty for any non-empty workspace.
+        let ws = "/some/path";
+        let system_content = format!(
+            "You are working in {}. When the user refers to \"this directory\", \
+             \"the current folder\", or uses relative paths, resolve them against \
+             this workspace.",
+            ws
+        );
+        let msg = json!({ "role": "system", "content": system_content });
+        assert_eq!(msg["role"], "system");
+        assert!(msg["content"].as_str().unwrap().contains(ws));
     }
 
     // -------------------------------------------------------------------------

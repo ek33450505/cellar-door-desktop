@@ -13,6 +13,7 @@
         { "name": "ollama-list",  "cmd": "ollama", "args": ["list"] }
       ]
     },
-    "shell:allow-kill"
+    "shell:allow-kill",
+    "dialog:default"
   ]
 }

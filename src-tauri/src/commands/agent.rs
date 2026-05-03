@@ -9,6 +9,9 @@ use crate::AppState;
 ///
 /// `session_id` ties all tool invocations for this turn together in cast.db.
 /// `top_k` controls memory context injection depth for the first iteration.
+/// `workspace_path` is an optional absolute path to the chat's pinned workspace
+/// folder. When set, a system message is prepended to resolve relative path
+/// references in the model's outputs. Added in Phase 7d (Task E-14).
 #[tauri::command]
 pub async fn start_agent_turn(
     app: AppHandle,
@@ -16,6 +19,7 @@ pub async fn start_agent_turn(
     messages: Vec<crate::commands::chat::ChatMessage>,
     top_k: usize,
     session_id: String,
+    workspace_path: Option<String>,
 ) -> Result<(), String> {
     // Convert frontend ChatMessage structs to serde_json::Value for the loop.
     let ollama_messages: Vec<Value> = messages
@@ -32,7 +36,16 @@ pub async fn start_agent_turn(
         }),
     );
 
-    run_agent_turn(app, model, ollama_messages, session_id, top_k).await
+    // Derive project name from workspace basename for memory scoping (E-16).
+    let project = workspace_path.as_deref().map(|ws| {
+        std::path::Path::new(ws)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string()
+    });
+
+    run_agent_turn(app, model, ollama_messages, session_id, top_k, workspace_path, project).await
 }
 
 /// Resolve a pending tool permission decision.

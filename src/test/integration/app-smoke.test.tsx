@@ -73,9 +73,12 @@ beforeEach(() => {
     return []
   })
 
-  // Reset stores to initial state before each test
+  // Reset stores to initial state before each test.
+  // messages is a computed getter over chats — reset via chats/activeChatId.
+  const resetChatId = crypto.randomUUID()
   useChatStore.setState({
-    messages: [],
+    chats: [{ id: resetChatId, title: 'New Chat', createdAt: Date.now(), updatedAt: Date.now(), workspacePath: null, messages: [] }],
+    activeChatId: resetChatId,
     isStreaming: false,
     model: 'mistral',
     availableModels: [],
