@@ -1,4 +1,6 @@
-# Tauri + React + Typescript
+# Cellar Door Desktop
+
+Tauri + React + TypeScript desktop companion for CAST and Cellar Door local routing.
 
 ## Prerequisites
 
@@ -9,8 +11,6 @@
 The app will attempt to start `ollama serve` automatically on launch. If Ollama is not installed, the Chat view will show an error banner.
 
 Chat integration tests are run manually (requires Ollama). CI runs unit tests only.
-
-This template should help get you started developing with Tauri, React and Typescript in Vite.
 
 ## Agent Mode (Phase 7c)
 
