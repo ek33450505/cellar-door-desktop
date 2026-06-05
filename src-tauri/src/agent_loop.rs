@@ -86,7 +86,7 @@ pub async fn run_agent_turn(
     }
 
     // E-16: Inject memory context on the first iteration.
-    // Uses top_k (was _top_k TODO stub) with project-scoped filtering when available.
+    // Uses top_k with project-scoped filtering when available.
     if top_k > 0 {
         // Build a prompt summary from the last user message for memory retrieval.
         let memory_prompt = messages

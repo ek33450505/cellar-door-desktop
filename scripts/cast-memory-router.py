@@ -29,10 +29,15 @@ import math
 import argparse
 import sqlite3
 import struct
+import urllib.parse
+import uuid
+import hashlib
 from datetime import datetime, timezone
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cast_db import db_query, db_execute, _connect
+# Use explicit install path so this works when deployed to ~/.claude/scripts/cellar-door/
+# where cast_db.py is absent. The sibling cast-memory-writeback.py uses the same pattern.
+sys.path.insert(0, os.path.expanduser("~/.claude/scripts"))
+from cast_db import db_query, db_execute, db_write, _connect
 
 STOP_WORDS = {
     'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
@@ -47,15 +52,31 @@ STOP_WORDS = {
     'very', 'just', 'also', 'as', 'up', 'if', 'then', 'into', 'about',
 }
 
-VALID_TYPES = {'user', 'feedback', 'project', 'reference', 'procedural'}
+VALID_TYPES = {'user', 'feedback', 'project', 'reference', 'procedural', 'user_profile'}
 
 OLLAMA_EMBED_URL = 'http://localhost:11434/api/embed'
 EMBED_MODEL = 'nomic-embed-text'
+
+_ALLOWED_EMBED_HOSTS = {'localhost', '127.0.0.1', '::1'}
+
+
+def _is_safe_url(url: str) -> bool:
+    """Return True only if url has an allowed scheme and a local hostname."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme not in ('http', 'https'):
+        return False
+    hostname = parsed.hostname or ''
+    return hostname in _ALLOWED_EMBED_HOSTS
 
 
 def embed_text(text, timeout=3):
     """Call Ollama embed API. Returns list[float] or None on any error."""
     try:
+        if not _is_safe_url(OLLAMA_EMBED_URL):
+            raise ValueError(f"Unsafe Ollama embed URL: {OLLAMA_EMBED_URL!r}")
         import urllib.request
         payload = json.dumps({"model": EMBED_MODEL, "input": text}).encode('utf-8')
         req = urllib.request.Request(
@@ -149,15 +170,48 @@ def invalidate_memory(memory_id):
     )
 
 
-def retrieve_memories(prompt, agent, top_n=5, type_filter=None, include_history=False,
-                      fts_only=False, project_filter=None):
-    """Return top-N memories for agent, ranked by relevance. Includes shared pool.
+def _log_injection(session_id: str, prompt: str, fact_id: int, score: float,
+                   score_breakdown_dict: dict) -> None:
+    """Write one row to injection_log for each fact that survives the score threshold.
 
+    injection_log.id is an INTEGER primary key (autoincrement) — omit it so SQLite
+    assigns it automatically. fact_id is INTEGER NOT NULL so we skip logging if it is
+    None (e.g. a memory row with no integer id).
+    """
+    try:
+        if fact_id is None:
+            return  # fact_id NOT NULL — skip rows without a numeric id
+        prompt_hash = hashlib.md5((prompt or '').encode('utf-8')).hexdigest()
+        db_write('injection_log', {
+            'session_id': session_id,
+            'prompt_hash': prompt_hash,
+            'fact_id': int(fact_id),
+            'score': float(score),
+            'score_breakdown': json.dumps(score_breakdown_dict),
+            'injected_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        })
+    except Exception as e:
+        try:
+            from cast_db import log_hook_failure
+            log_hook_failure('cast-memory-router:injection_log', -1, str(e), session_id)
+        except Exception:
+            pass
+
+
+def retrieve_memories(prompt, agent, top_n=5, type_filter=None, include_history=False,
+                      fts_only=False, agent_type=None, project_filter=None):
+    """Return top-N memories for agent, ranked by relevance. Includes shared pool and user_profile (global) facts.
+
+    agent_type — when set to one of (commit, push, merge, code-reviewer), exclude type IN ('project', 'reference').
     project_filter — when set, narrow results to memories where am.project = project_filter.
     If the agent_memories table lacks a 'project' column (pre-Phase-1.5 install), the filter
     is silently ignored and memories are returned without project narrowing.
     """
     conn = _connect()
+
+    # Determine if we should filter out project/reference for lightweight agents
+    lightweight_agents = {'commit', 'push', 'merge', 'code-reviewer'}
+    should_filter = agent_type in lightweight_agents if agent_type else False
 
     # Check FTS availability
     has_fts = conn.execute(
@@ -169,8 +223,6 @@ def retrieve_memories(prompt, agent, top_n=5, type_filter=None, include_history=
     column_names = [row[1] for row in cursor.fetchall()]
 
     # Phase 4 — Supersession filter: only surface facts with valid_to IS NULL (current facts).
-    # Superseded facts have valid_to set by cast-memory-writeback.py. Pass include_history=True
-    # to retrieve the full chain (used by cast-memory history subcommand).
     # Gate on column existence so function degrades gracefully before migration runs
     has_valid_to = 'valid_to' in column_names
     if has_valid_to and not include_history:
@@ -178,8 +230,15 @@ def retrieve_memories(prompt, agent, top_n=5, type_filter=None, include_history=
     else:
         temporal_clause = ""
 
-    type_clause = "AND am.type = ?" if type_filter else ""
-    type_params = (type_filter,) if type_filter else ()
+    # Type filter: either explicit --type filter OR implicit lightweight-agent filter
+    type_params = ()
+    if type_filter:
+        type_clause = "AND am.type = ?"
+        type_params = (type_filter,)
+    elif should_filter:
+        type_clause = "AND am.type NOT IN ('project', 'reference')"
+    else:
+        type_clause = ""
 
     # E-16: project filter — graceful degradation if 'project' column is absent.
     if project_filter and 'project' in column_names:
@@ -203,7 +262,7 @@ def retrieve_memories(prompt, agent, top_n=5, type_filter=None, include_history=
                     FROM agent_memories am
                     JOIN agent_memories_fts fts ON am.id = fts.rowid
                     WHERE agent_memories_fts MATCH ?
-                    AND (am.agent = ? OR am.agent = 'shared')
+                    AND (am.agent = ? OR am.agent = 'shared' OR (am.agent = 'global' AND am.type = 'user_profile'))
                     {temporal_clause}
                     {type_clause}
                     {project_clause}
@@ -221,7 +280,7 @@ def retrieve_memories(prompt, agent, top_n=5, type_filter=None, include_history=
         sql = f"""
             SELECT am.*, 0 AS rank
             FROM agent_memories am
-            WHERE (am.agent = ? OR am.agent = 'shared')
+            WHERE (am.agent = ? OR am.agent = 'shared' OR (am.agent = 'global' AND am.type = 'user_profile'))
             {temporal_clause}
             {type_clause}
             {project_clause}
@@ -310,8 +369,12 @@ def main():
                         help='Include superseded (valid_to IS NOT NULL) memories in retrieve mode')
     parser.add_argument('--fts-only', action='store_true', default=False,
                         help='Skip Ollama embed call; use cosine_sim=0.0 (faster, ~10-30ms)')
+    parser.add_argument('--agent-type', type=str, default=None,
+                        help='Agent type for filtering (commit|push|merge|code-reviewer excludes project/reference types)')
     parser.add_argument('--invalidate', type=int, default=None, metavar='ID',
                         help='Mark memory with given ID as superseded (sets valid_to=now) and exit')
+    parser.add_argument('--session-id', type=str, default=None,
+                        help='Session ID for injection_log telemetry (retrieve mode)')
     parser.add_argument('--project', type=str, default=None,
                         help='Filter memories by project field (retrieve mode)')
     args = parser.parse_args()
@@ -378,10 +441,12 @@ def main():
         if args.mode == 'retrieve':
             agent = args.agent or 'shared'
             type_filter = args.type
+            session_id = args.session_id or os.environ.get('CAST_SESSION_ID', '')
             results = retrieve_memories(prompt, agent, top_n=args.top_n,
                                         type_filter=type_filter,
                                         include_history=args.history,
                                         fts_only=args.fts_only,
+                                        agent_type=args.agent_type,
                                         project_filter=args.project)
 
             # Get column names for building output dicts
@@ -396,6 +461,18 @@ def main():
                     mem_dict[col] = row_list[i] if i < len(row_list) else None
                 mem_dict['score'] = round(score, 4)
                 output.append(mem_dict)
+                # Log each injected fact to injection_log for observability
+                _log_injection(
+                    session_id=session_id,
+                    prompt=prompt,
+                    fact_id=mem_dict.get('id'),
+                    score=score,
+                    score_breakdown_dict={
+                        'fts_rank': row_list[-1] if row_list else 0.0,
+                        'cosine_sim': mem_dict.get('score', 0.0),
+                        'agent': agent,
+                    },
+                )
 
             print(json.dumps(output, default=str))
             return
